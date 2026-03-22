@@ -1,15 +1,15 @@
 # Long-Running Agent Skill for Cortex Code
 
-A [Cortex Code](https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code) skill that orchestrates complex, multi-session data and AI projects using the [Anthropic harness pattern](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents). It enables an AI agent to make structured, incremental progress across many context windows without losing track of work.
+A [Cortex Code](https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code) skill that orchestrates complex, multi-session projects using the [Anthropic harness pattern](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents). It enables an AI agent to make structured, incremental progress across many context windows without losing track of work.
 
 ## The Problem
 
-When you ask Cortex Code to build something complex -- a multi-model dbt project, a Streamlit dashboard backed by Cortex AI, or a full data pipeline -- the agent tends to:
+When you ask Cortex Code to build something complex, the agent tends to:
 
 - Forget what it built in the previous session
-- Try to create all tables, models, and UDFs in one shot
-- Mark things as done before they actually work end-to-end
-- Leave broken SQL or half-migrated schemas between sessions
+- Try to build everything in one shot
+- Mark things as done before they actually work
+- Leave the project in a broken state between sessions
 
 This skill fixes that by imposing structure: a feature list, a progress log, smoke tests, and git discipline.
 
@@ -30,27 +30,97 @@ Verify it loaded -- open Cortex Code and run `/skill`. You should see `long-runn
 
 ## Quick Start
 
-### 1. Initialize your project
+### 1. Provide your project spec
 
-Navigate to your project directory in Cortex Code and run:
+You can provide your project requirements in two ways:
+
+**Option A: Free text**
 
 ```
-$long-running init "Build a customer analytics pipeline: ingest raw CSV data into Snowflake staging tables, transform with dbt models into a dimensional model, add Cortex AI sentiment analysis on support tickets, and expose metrics via a Streamlit dashboard"
+$long-running init "Build a REST API with user authentication, rate limiting, and a Postgres backend"
 ```
 
-The skill will:
-- Decompose your spec into **concrete, testable features** in `features.json`
-- Create `init.sh` with smoke tests (e.g., `dbt debug`, `snow sql` health checks)
-- Create `progress.md` as a session-by-session log
-- Initialize git and register persistent context via `cortex ctx`
+**Option B: Reference a markdown file**
 
-### 2. Work on features one at a time
+Write your requirements in a `.md` file with as much detail as you want:
+
+```markdown
+# My Project Requirements
+
+## Overview
+Build a data processing system that ingests CSV files, validates them,
+transforms the data, and loads it into a target database.
+
+## Features
+- File upload via API endpoint
+- Schema validation with clear error messages
+- Configurable transformation rules
+- Incremental loading with deduplication
+- Error logging and retry mechanism
+- Admin dashboard to monitor pipeline status
+```
+
+Then point the skill at it:
+
+```
+$long-running init @requirements.md
+```
+
+The more detail you provide, the better the feature decomposition. But even a single sentence works -- the skill will ask clarifying questions if the spec is too vague.
+
+### 2. What initialization creates
+
+The skill decomposes your spec into concrete, testable features:
+
+```
+my-project/
+├── features.json       # Feature list with pass/fail tracking
+├── init.sh             # Smoke test script for your specific project
+├── progress.md         # Session-by-session progress log
+├── .git/               # Git repo -- every feature gets a commit
+└── ... (your code)
+```
+
+**features.json** contains structured, verifiable features:
+
+```json
+[
+  {
+    "id": 1,
+    "category": "foundation",
+    "description": "Project structure with entry point that runs without errors",
+    "steps": [
+      "Run the main entry point or help command",
+      "Verify it executes without errors",
+      "Verify exit code is 0"
+    ],
+    "passes": false,
+    "priority": 1
+  },
+  {
+    "id": 2,
+    "category": "functional",
+    "description": "File upload endpoint accepts CSV and returns confirmation",
+    "steps": [
+      "POST a valid CSV to the upload endpoint",
+      "Verify 200 response with file metadata",
+      "Verify the file is persisted to the expected location"
+    ],
+    "passes": false,
+    "priority": 2
+  }
+]
+```
+
+**init.sh** is tailored to your project -- it might run a test suite, start a dev server, check a database connection, or simply verify the code compiles. It runs at the start of every session to catch regressions.
+
+### 3. Work on features one at a time
 
 ```
 $long-running
 ```
 
-The agent follows four phases every session:
+Each session follows four phases:
 
 ```
 ORIENT  →  VERIFY  →  IMPLEMENT  →  CLEANUP
@@ -58,173 +128,109 @@ ORIENT  →  VERIFY  →  IMPLEMENT  →  CLEANUP
 
 | Phase | What happens |
 |-------|-------------|
-| Orient | Reads `progress.md`, `features.json`, git log. Announces: "12/25 features passing. Next: staging table for support tickets." |
-| Verify | Runs `init.sh` -- checks `dbt build` passes, Streamlit app starts, Snowflake connection works. Fixes regressions before new work. |
-| Implement | Picks ONE feature. Builds it. Self-verifies against the feature's test steps. Marks `passes: true` only when verified. |
-| Cleanup | Commits to git, updates `progress.md`, presents summary with completion percentage. |
+| **Orient** | Reads `progress.md`, `features.json`, and git log. Announces current state and next feature. |
+| **Verify** | Runs `init.sh` to catch regressions. Fixes anything broken before starting new work. |
+| **Implement** | Picks ONE incomplete feature. Builds it. Self-verifies against the feature's test steps. Marks `passes: true` only when verified. |
+| **Cleanup** | Commits to git, updates `progress.md`, presents summary with completion percentage. |
 
-### 3. Resume across sessions
+### 4. Resume across sessions
 
 ```bash
-# Next day, pick up where you left off
+# Pick up where you left off
 cortex -r last
 $long-running
 ```
 
-Or start a fresh session -- the skill reads `features.json` and `progress.md` to reconstruct state.
+Or start a fresh session -- the skill reads `features.json` and `progress.md` to reconstruct full project state.
 
-### 4. Check status anytime
+### 5. Check status anytime
 
 ```
 $long-running status
 ```
 
-## Real-World Examples
+Shows completion percentage, recent session history, and what's next.
 
-### Example 1: dbt + Snowflake Data Pipeline
-
-```
-$long-running init "Migrate legacy Oracle ETL to Snowflake with dbt:
-- 3 source systems (ERP, CRM, support tickets)
-- Staging layer with incremental loads
-- Intermediate transformations for deduplication and SCD2
-- Mart layer with customer_360, order_metrics, and support_analytics models
-- dbt tests for uniqueness, not_null, accepted_values, and referential integrity
-- Documentation with descriptions and column-level docs"
-```
-
-The skill generates features like:
-
-```json
-[
-  {
-    "id": 1,
-    "category": "foundation",
-    "description": "dbt project structure with profiles.yml pointing to Snowflake",
-    "steps": [
-      "Run dbt debug and verify connection succeeds",
-      "Verify dbt_project.yml has correct config",
-      "Verify profiles.yml uses the correct Snowflake warehouse and database"
-    ],
-    "passes": false,
-    "priority": 1
-  },
-  {
-    "id": 2,
-    "category": "foundation",
-    "description": "Snowflake staging schema DDL and source definitions",
-    "steps": [
-      "Verify RAW database and STAGING schema exist in Snowflake",
-      "Run dbt source freshness and confirm sources are defined",
-      "Verify schema.yml has source descriptions"
-    ],
-    "passes": false,
-    "priority": 2
-  },
-  {
-    "id": 5,
-    "category": "functional",
-    "description": "stg_erp__orders incremental model with deduplication",
-    "steps": [
-      "Run dbt run -s stg_erp__orders",
-      "Verify row count matches source after dedup",
-      "Run dbt test -s stg_erp__orders -- uniqueness and not_null pass"
-    ],
-    "passes": false,
-    "priority": 5
-  }
-]
-```
-
-Each session, the agent picks one model, builds it, tests it, and commits -- so you never end up with 15 half-broken models.
-
-### Example 2: Cortex AI Application
+## How a Session Looks in Practice
 
 ```
-$long-running init "Build a Cortex AI-powered document processing pipeline:
-- Stage for PDF uploads
-- Cortex PARSE_DOCUMENT to extract text
-- Cortex AI_EXTRACT for entity extraction (invoice number, amount, vendor)
-- Cortex AI_CLASSIFY to categorize documents (invoice, receipt, contract)
-- Results stored in structured Snowflake tables
-- Streamlit UI for upload, review, and correction
-- Cortex Search service for full-text search across processed documents"
+$long-running
+
+> ORIENT: Reading project state...
+> Status: 5/14 features passing (36%)
+> Last session: Completed feature #5 — "Schema validation with error messages"
+> Next up: Feature #6 — "Configurable transformation rules"
+
+> VERIFY: Running init.sh...
+> All checks pass. Environment is clean.
+
+> IMPLEMENT: Working on feature #6 — "Configurable transformation rules"
+>   Steps to verify:
+>     1. Define a transformation config format
+>     2. Apply a sample transformation to test data
+>     3. Verify output matches expected result
+>
+> (agent implements the feature, tests it, marks it passing)
+
+> CLEANUP:
+>   Committed: feat(6): configurable transformation rules with YAML config
+>   Progress: 6/14 features passing (43%)
+>   Next session: Feature #7 — "Incremental loading with deduplication"
+>   Project state: Clean, all tests passing.
 ```
 
-Sessions might look like:
+## Providing a Good Spec
+
+The quality of the feature decomposition depends on the quality of your input. Here are guidelines:
+
+### Minimal (works, but features will be broad)
 
 ```
-Session 3 — Feature #3: Cortex PARSE_DOCUMENT stored procedure
-  - Created SP that reads PDFs from stage, calls PARSE_DOCUMENT
-  - Verified with 3 sample PDFs: text extraction works
-  - Committed: feat(3): parse_document SP with error handling
-  - Progress: 3/10 features passing (30%)
-  - Next: #4 — AI_EXTRACT entity extraction
+$long-running init "Build a CLI tool that converts JSON to CSV"
 ```
 
-### Example 3: Streamlit Dashboard with Semantic Views
+### Better (clear scope, the skill can decompose well)
 
 ```
-$long-running init "Build an executive analytics dashboard in Streamlit:
-- Semantic view for revenue metrics (ARR, MRR, churn, expansion)
-- Semantic view for product usage (DAU, MAU, feature adoption)
-- Streamlit multi-page app with Overview, Revenue, and Usage pages
-- Cortex Analyst integration for natural language queries
-- Row-level security via session context for regional filtering
-- Caching with st.cache_data and 15-minute TTL"
+$long-running init "Build a CLI tool that converts JSON to CSV:
+- Handles nested JSON by flattening with dot notation
+- Supports arrays by expanding into multiple rows
+- Accepts file path or stdin
+- Outputs to file or stdout
+- Handles encoding issues gracefully"
 ```
 
-### Example 4: ML Pipeline on Snowflake
+### Best (detailed spec as a markdown file)
 
 ```
-$long-running init "Build a customer churn prediction pipeline:
-- Feature engineering with dynamic tables (aggregated usage, billing, support metrics)
-- Training dataset view joining features with churn labels
-- Snowpark ML model training (XGBoost) with hyperparameter tuning
-- Model registered in Snowflake Model Registry
-- Inference UDF for real-time scoring
-- Monitoring table tracking prediction drift over time
-- Streamlit app for model performance review and manual overrides"
+$long-running init @spec.md
 ```
 
-## Project Structure
+Where `spec.md` contains sections for overview, features, constraints, and acceptance criteria. The skill will turn each into a trackable feature with concrete verification steps.
 
-After initialization, your project contains:
+### What makes a good spec
+
+- **Be specific about outcomes**, not implementation. "Users can search by name and see results in under 2 seconds" is better than "Use Elasticsearch."
+- **List the things a user can do.** Each action tends to map to one feature.
+- **Mention constraints.** "Must work offline", "Must handle 10k rows", "Must support Python 3.10+" -- these become verification steps.
+- **Don't worry about architecture.** The agent will figure out the how. Focus on the what.
+
+## Typical Workflow
 
 ```
-my-project/
-├── features.json       # Feature list with pass/fail tracking
-├── init.sh             # Smoke tests (dbt debug, snow sql, streamlit check, etc.)
-├── progress.md         # Session-by-session log
-├── .git/               # Git repo -- every feature is a commit
-└── ... (your code: dbt models, Streamlit apps, SQL scripts, etc.)
-```
+Day 1:
+  $long-running init @requirements.md    # Decompose spec into features
+  $long-running                          # Feature #1: project structure
+  $long-running                          # Feature #2: core foundation
 
-### features.json rules
+Day 2:
+  cortex -r last
+  $long-running status                   # "4/18 features passing (22%)"
+  $long-running                          # Feature #5: next in line
 
-- Every feature starts as `"passes": false`
-- Only the `passes` field can be changed -- descriptions and steps are immutable
-- A feature is only marked passing after the agent verifies every test step
-- The agent works on the lowest-priority incomplete feature first
-
-### init.sh examples
-
-For a dbt project:
-```bash
-#!/bin/bash
-set -e
-dbt debug                    # Verify Snowflake connection
-dbt build                    # Build and test all models
-echo "Smoke test passed"
-```
-
-For a Streamlit app:
-```bash
-#!/bin/bash
-set -e
-python -c "import streamlit; print('streamlit OK')"
-python -c "from app import main; print('app imports OK')"
-echo "Smoke test passed"
+Day 3+:
+  # Same pattern. Each session picks up exactly where the last left off.
+  # No context lost. No repeated work. No broken state.
 ```
 
 ## How It Maps to Cortex Code Primitives
@@ -239,62 +245,33 @@ echo "Smoke test passed"
 | Git safety net | Built-in git tools (commit, revert, diff) |
 | Smoke tests | `init.sh` run at the start of every session |
 
-## Typical Workflow for a Data Engineer
+## features.json Rules
 
-```
-Day 1 morning:
-  $long-running init "<project spec>"
-  $long-running                        # Feature #1: project structure
-  $long-running                        # Feature #2: staging schema
-
-Day 1 afternoon:
-  cortex -r last
-  $long-running                        # Feature #3: first staging model
-  $long-running                        # Feature #4: second staging model
-
-Day 2:
-  cortex -r last
-  $long-running status                 # "8/20 features passing (40%)"
-  $long-running                        # Feature #9: intermediate model
-  ...
-
-Day 3-5:
-  # Same pattern. Each session picks up exactly where the last left off.
-  # No context lost. No repeated work. No broken state.
-```
+- Every feature starts as `"passes": false`
+- Only the `passes` field can be changed -- descriptions and steps are immutable
+- A feature is only marked passing after the agent verifies every test step
+- The agent works on the lowest-priority incomplete feature first
 
 ## Customization
 
 ### Adjust feature granularity
 
 Edit `SKILL.md` to tune how many features the initializer generates:
-- Small projects (scripts, single models): 5-15 features
-- Medium projects (dbt packages, multi-page apps): 15-30 features
-- Large projects (full platform builds): 30-50+ features
+- Small projects: 5-15 features
+- Medium projects: 15-30 features
+- Large projects: 30-50+ features
 
 ### Add specialized agents
 
 Create custom agents in `.cortex/agents/` to extend the pattern:
 
-- **dbt-test-agent** -- runs `dbt test` with verbose output after each model
-- **sql-review-agent** -- checks for performance issues (missing clustering keys, full table scans)
-- **security-agent** -- verifies masking policies and row access policies are applied
+- **test-agent** -- runs the full test suite after each feature
+- **review-agent** -- reviews code quality before marking features as passing
+- **cleanup-agent** -- refactors and polishes after all features pass
 
 ### Integrate with CI/CD
 
-The git-commit-per-feature approach means you can wire up GitHub Actions or similar:
-
-```yaml
-on:
-  push:
-    branches: [main]
-jobs:
-  dbt-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: dbt build --target ci
-```
+The git-commit-per-feature approach works naturally with CI pipelines. Each feature is an atomic, tested commit that can trigger automated checks on push.
 
 ## Skill File Structure
 
