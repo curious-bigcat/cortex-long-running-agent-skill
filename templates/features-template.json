@@ -1,0 +1,26 @@
+[
+  {
+    "id": 1,
+    "category": "functional",
+    "description": "User can open the app and see the main interface",
+    "steps": [
+      "Navigate to the app URL or run the main command",
+      "Verify the main interface loads without errors",
+      "Check that core UI elements are visible"
+    ],
+    "passes": false,
+    "priority": 1
+  },
+  {
+    "id": 2,
+    "category": "functional",
+    "description": "Example: second feature placeholder",
+    "steps": [
+      "Step 1: Setup preconditions",
+      "Step 2: Perform the action",
+      "Step 3: Verify the expected outcome"
+    ],
+    "passes": false,
+    "priority": 2
+  }
+]
